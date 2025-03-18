@@ -22,62 +22,63 @@ const Interpreter = struct {
     input: []u8,
     pos: usize = 0,
     current_token: ?Token = null,
+    current_char: u8 = undefined,
 
-    pub fn get_next_char(self: *Interpreter) ?u8 {
-        if (self.pos >= self.input.len - 1) return null;
-        while (self.input[self.pos] == ' ' and self.pos < self.input.len - 1) {
+    pub fn skip_whitespace(self: *Interpreter) void {
+        while (self.current_char == ' ') {
             self.pos += 1;
+            if (self.pos >= self.input.len) return;
+            self.current_char = self.input[self.pos];
         }
-        if (self.pos >= self.input.len - 1) return null;
+    }
 
-        const current_char = self.input[self.pos];
+    pub fn advance(self: *Interpreter) bool {
+        if (self.pos >= self.input.len) {
+            print("advanced to eof\n", .{});
+            self.current_char = 0;
+            return false;
+        }
+        self.current_char = self.input[self.pos];
+        self.skip_whitespace();
         self.pos += 1;
-        return current_char;
+        print("advanced to {c}\n", .{self.current_char});
+        return true;
+    }
+
+    pub fn number(self: *Interpreter) f32 {
+        var found_dot = false;
+        var number_str = std.ArrayList(u8).init(alloc);
+        while (std.ascii.isDigit(self.current_char) or self.current_char == '.') {
+            if (self.current_char == '.') {
+                if (found_dot) @panic("two many dots in one number.");
+                found_dot = true;
+            }
+            number_str.append(self.current_char) catch @panic("alloc error.");
+            if (!self.advance()) break;
+        }
+        if (number_str.items.len == 0 or (number_str.items.len == 1 and number_str.items[0] == '.')) {
+            @panic("error collecting number string.");
+        }
+        self.pos -= 1;
+
+        return std.fmt.parseFloat(f32, number_str.items) catch @panic("error parsing number.");
     }
 
     pub fn get_next_token(self: *Interpreter) Token {
-        if (self.pos > self.input.len - 1) {
-            return Token{ .type = TokenCodes.eof };
-        }
-
-        var current_char: u8 = self.get_next_char() orelse return Token{ .type = TokenCodes.eof };
-
-        if (current_char == '+') {
+        if (!self.advance()) return Token{ .type = TokenCodes.eof };
+        if (self.current_char == '+') {
             return Token{ .type = TokenCodes.add };
         }
-
-        if (current_char == '-') {
+        if (self.current_char == '-') {
             return Token{ .type = TokenCodes.sub };
         }
-
-        var found_a_number = false;
-        var have_a_dot: bool = false;
-        var str = std.ArrayList(u8).init(alloc);
-        while ((std.ascii.isDigit(current_char) or current_char == '.')) {
-            found_a_number = true;
-            if (current_char == '.') {
-                if (have_a_dot) @panic("two many dots in one number.");
-                have_a_dot = true;
-            }
-
-            str.append(current_char) catch @panic("alloc failure.");
-            current_char = self.get_next_char() orelse break;
-        }
-
-        if (std.mem.eql(u8, str.items, ".")) @panic("got a dot and not a number.");
-        if (!found_a_number) {
-            print("register contains: {s}\n", .{str.items});
-            @panic("fatal error parsing token.");
-        }
-
-        self.pos -= 1;
-
-        const value = std.fmt.parseFloat(f32, str.items) catch @panic("failed to parseFloat.");
-        return Token{ .type = TokenCodes.number, .value = value };
+        return Token{ .type = TokenCodes.number, .value = self.number() };
     }
 
     pub fn eat(self: *Interpreter, acceptable_tokens: []const TokenCodes) void {
-        print("eating token: {?} and expecting {any}\n", .{ self.current_token, acceptable_tokens });
+        print("\nparsed new token {?}\n", .{self.current_token});
+        print("current char: ({c})\n", .{self.current_char});
+        print("eating token: {?} and expecting {any}\n\n", .{ self.current_token, acceptable_tokens });
         for (acceptable_tokens) |ok_token| {
             if (self.current_token.?.type == ok_token) {
                 self.current_token = self.get_next_token();
@@ -96,6 +97,7 @@ const Interpreter = struct {
 
     pub fn eval(self: *Interpreter) f32 {
         self.current_token = self.get_next_token();
+
         const left = self.current_token;
         self.eat(&[_]TokenCodes{TokenCodes.number});
 
@@ -104,6 +106,8 @@ const Interpreter = struct {
 
         const right = self.current_token;
         self.eat(&[_]TokenCodes{TokenCodes.number});
+
+        self.eat(&[_]TokenCodes{TokenCodes.eof});
 
         const result = if (op.?.type == TokenCodes.add) left.?.value.? + right.?.value.? else left.?.value.? - right.?.value.?;
         return result;
