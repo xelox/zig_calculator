@@ -2,9 +2,13 @@ const std = @import("std");
 const print = std.debug.print;
 
 const TokenCodes = enum {
-    number,
     add,
     sub,
+    mul,
+    div,
+    lpar,
+    rpar,
+    number,
     eof,
 };
 
@@ -66,12 +70,12 @@ const Interpreter = struct {
 
     pub fn get_next_token(self: *Interpreter) Token {
         if (!self.advance()) return Token{ .type = TokenCodes.eof };
-        if (self.current_char == '+') {
-            return Token{ .type = TokenCodes.add };
-        }
-        if (self.current_char == '-') {
-            return Token{ .type = TokenCodes.sub };
-        }
+        if (self.current_char == '+') return Token{ .type = TokenCodes.add };
+        if (self.current_char == '-') return Token{ .type = TokenCodes.sub };
+        if (self.current_char == '*') return Token{ .type = TokenCodes.mul };
+        if (self.current_char == '/') return Token{ .type = TokenCodes.div };
+        if (self.current_char == '(') return Token{ .type = TokenCodes.lpar };
+        if (self.current_char == ')') return Token{ .type = TokenCodes.rpar };
         return Token{ .type = TokenCodes.number, .value = self.number() };
     }
 
