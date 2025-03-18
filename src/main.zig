@@ -15,6 +15,7 @@ const TokenCodes = enum {
 const Token = struct {
     type: TokenCodes,
     value: ?f32 = null,
+
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
@@ -79,42 +80,77 @@ const Interpreter = struct {
         return Token{ .type = TokenCodes.number, .value = self.number() };
     }
 
-    pub fn eat(self: *Interpreter, acceptable_tokens: []const TokenCodes) void {
-        print("\nparsed new token {?}\n", .{self.current_token});
-        print("current char: ({c})\n", .{self.current_char});
-        print("eating token: {?} and expecting {any}\n\n", .{ self.current_token, acceptable_tokens });
-        for (acceptable_tokens) |ok_token| {
-            if (self.current_token.?.type == ok_token) {
-                self.current_token = self.get_next_token();
-                return;
-            }
+    pub fn eat(self: *Interpreter, expected: TokenCodes) void {
+        print("eating token: {?} and expecting {s}\n", .{ self.current_token, @tagName(expected) });
+        if (self.current_token.?.type == expected) {
+            self.current_token = self.get_next_token();
+            return;
         }
         var buff: [1028]u8 = undefined;
-        if (acceptable_tokens.len == 1) {
-            _ = std.fmt.bufPrint(&buff, "current_token is {?} but {any} was expected", .{ self.current_token, acceptable_tokens[0] }) catch unreachable;
-            @panic(&buff);
-        } else {
-            _ = std.fmt.bufPrint(&buff, "current token is {?} but any of {any} were expected", .{ self.current_token, acceptable_tokens }) catch unreachable;
-            @panic(&buff);
+        _ = std.fmt.bufPrint(&buff, "current_token is {?} but {s} was expected", .{ self.current_token, @tagName(expected) }) catch unreachable;
+        @panic(&buff);
+    }
+
+    pub fn factor(self: *Interpreter) f32 {
+        switch (self.current_token.?.type) {
+            TokenCodes.number => {
+                const value = self.current_token.?.value.?;
+                self.eat(TokenCodes.number);
+                return value;
+            },
+            TokenCodes.lpar => {
+                self.eat(TokenCodes.lpar);
+                const result = self.expr();
+                self.eat(TokenCodes.rpar);
+                return result;
+            },
+            else => {
+                @panic("Unexpected Token");
+            },
         }
+    }
+
+    pub fn term(self: *Interpreter) f32 {
+        var result = self.factor();
+        while (self.current_token.?.type == TokenCodes.mul or self.current_token.?.type == TokenCodes.div) {
+            const token = self.current_token.?;
+            switch (token.type) {
+                TokenCodes.mul => {
+                    self.eat(TokenCodes.mul);
+                    result *= self.factor();
+                },
+                TokenCodes.div => {
+                    self.eat(TokenCodes.div);
+                    result /= self.factor();
+                },
+                else => unreachable,
+            }
+        }
+        return result;
+    }
+
+    pub fn expr(self: *Interpreter) f32 {
+        var result = self.term();
+        while (self.current_token.?.type == TokenCodes.add or self.current_token.?.type == TokenCodes.sub) {
+            const token = self.current_token.?;
+            switch (token.type) {
+                TokenCodes.add => {
+                    self.eat(TokenCodes.add);
+                    result += self.term();
+                },
+                TokenCodes.sub => {
+                    self.eat(TokenCodes.sub);
+                    result -= self.term();
+                },
+                else => unreachable,
+            }
+        }
+        return result;
     }
 
     pub fn eval(self: *Interpreter) f32 {
         self.current_token = self.get_next_token();
-
-        const left = self.current_token;
-        self.eat(&[_]TokenCodes{TokenCodes.number});
-
-        const op = self.current_token;
-        self.eat(&[_]TokenCodes{ TokenCodes.add, TokenCodes.sub });
-
-        const right = self.current_token;
-        self.eat(&[_]TokenCodes{TokenCodes.number});
-
-        self.eat(&[_]TokenCodes{TokenCodes.eof});
-
-        const result = if (op.?.type == TokenCodes.add) left.?.value.? + right.?.value.? else left.?.value.? - right.?.value.?;
-        return result;
+        return self.expr();
     }
 };
 
