@@ -119,3 +119,22 @@ test "identifier tokens" {
 
     try std.testing.expect(token_hello_world.eql(&other));
 }
+
+test "token equality" {
+    const alloc = std.testing.allocator;
+
+    const mul = Token{ .variant = TokenVariants.mul };
+    const other_mul = Token{ .variant = TokenVariants.mul };
+    const not_mul = Token{ .variant = TokenVariants.add };
+
+    try std.testing.expect(mul.eql(&other_mul));
+    try std.testing.expect(!mul.eql(&not_mul));
+
+    const a = try Token.create_number(alloc, 69);
+    defer a.destroy(alloc);
+
+    const b = try Token.create_number(alloc, 420);
+    defer b.destroy(alloc);
+
+    try std.testing.expect(!a.eql(&b));
+}
