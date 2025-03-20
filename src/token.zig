@@ -26,24 +26,40 @@ pub const Token = struct {
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        try writer.print("Token({s}, {?d})", .{ @tagName(self.type), self.value });
+        switch (self.variant) {
+            TokenVariants.identifier => {
+                const str = try self.get_identifier();
+                try writer.print("Token({s}, {s})", .{ @tagName(self.variant), str });
+            },
+            TokenVariants.number => {
+                const num = try self.get_number();
+                try writer.print("Token({s}, {d})", .{ @tagName(self.variant), num });
+            },
+            else => {
+                try writer.print("Token({s}, null)", .{@tagName(self.variant)});
+            },
+        }
+    }
+
+    pub fn create_simple_token(variant: TokenVariants) Token {
+        return Token{ .variant = variant };
     }
 
     pub fn create_number(alloc: Allocator, value: f64) !Token {
         const heap_ptr = try alloc.create(f64);
         heap_ptr.* = value;
+
         return Token{
             .variant = TokenVariants.number,
             .value = @ptrCast(heap_ptr),
         };
     }
 
-    pub fn create_identifier(alloc: Allocator, value: []const u8) !Token {
-        const heap_ptr = try alloc.alloc(u8, value.len);
-        std.mem.copyBackwards(u8, heap_ptr, value);
+    /// Create an identifier by taking ownership of heap allocated memory
+    pub fn create_identifier(value: []const u8) !Token {
         return Token{
             .variant = TokenVariants.identifier,
-            .value = @ptrCast(heap_ptr),
+            .value = @ptrCast(@constCast(value)),
             .len = value.len,
         };
     }
@@ -68,7 +84,7 @@ pub const Token = struct {
         return f32_ptr.*;
     }
 
-    /// Returns a heap allocated String.
+    /// returns memory owned memory, use immediatly or copy for later use.
     pub fn get_identifier(self: *const Token) ![]u8 {
         if (self.variant != TokenVariants.identifier) return TokenError.BadGetIdentifier;
         const str_ptr: []u8 = @as([*]u8, @ptrCast(self.value))[0..self.len];
@@ -111,13 +127,26 @@ test "number tokens" {
 test "identifier tokens" {
     const alloc = std.testing.allocator;
 
-    const token_hello_world = try Token.create_identifier(alloc, "hello world!");
-    defer token_hello_world.destroy(alloc);
+    const hello_world = "hello world!";
 
-    const other = try Token.create_identifier(alloc, "hello world!");
-    defer other.destroy(alloc);
+    const hello_ptr1 = try alloc.alloc(u8, hello_world.len);
+    std.mem.copyBackwards(u8, hello_ptr1, hello_world);
+    const rhs_token = try Token.create_identifier(hello_ptr1);
+    defer rhs_token.destroy(alloc);
 
-    try std.testing.expect(token_hello_world.eql(&other));
+    const hello_ptr2 = try alloc.alloc(u8, hello_world.len);
+    std.mem.copyBackwards(u8, hello_ptr2, hello_world);
+    const lhs_token = try Token.create_identifier(hello_ptr2);
+    defer lhs_token.destroy(alloc);
+
+    try std.testing.expect(rhs_token.eql(&lhs_token));
+
+    const other_ptr = try alloc.alloc(u8, 3);
+    std.mem.copyBackwards(u8, other_ptr, "xyz");
+    const other_token = try Token.create_identifier(other_ptr);
+    defer other_token.destroy(alloc);
+
+    try std.testing.expect(!rhs_token.eql(&other_token));
 }
 
 test "token equality" {
