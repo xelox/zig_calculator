@@ -73,14 +73,14 @@ const Lexer = struct {
         self.advance();
         if (self.current_char == null) return Token{ .variant = TokenVariants.eof };
         return switch (self.current_char.?) {
-            '+' => Token.create_basic(TokenVariants.add),
-            '-' => Token.create_basic(TokenVariants.sub),
-            '*' => Token.create_basic(TokenVariants.mul),
-            '/' => Token.create_basic(TokenVariants.div),
-            '(' => Token.create_basic(TokenVariants.lpar),
-            ')' => Token.create_basic(TokenVariants.rpar),
-            'a'...'z', 'A'...'Z', '_' => try Token.create_identifier(self.alloc, try self.identifier()),
-            '0'...'9', '.' => try Token.create_number(self.alloc, try self.number()),
+            '+' => Token.createBasic(TokenVariants.add),
+            '-' => Token.createBasic(TokenVariants.sub),
+            '*' => Token.createBasic(TokenVariants.mul),
+            '/' => Token.createBasic(TokenVariants.div),
+            '(' => Token.createBasic(TokenVariants.lpar),
+            ')' => Token.createBasic(TokenVariants.rpar),
+            'a'...'z', 'A'...'Z', '_' => try Token.createIdentifier(self.alloc, try self.identifier()),
+            '0'...'9', '.' => try Token.createNumber(self.alloc, try self.number()),
             else => LexerErrors.UnknwonSymbolInSequence,
         };
     }
@@ -96,23 +96,23 @@ test "complete lexer test" {
 
     const identifier_str = "identifier";
     const identifier_ptr = try alloc.alloc(u8, identifier_str.len);
-    std.mem.copyBackwards(u8, identifier_ptr, identifier_str);
+    @memcpy(identifier_ptr, identifier_str);
 
     const text84_yes_str = "text84_yes";
     const text84_yes_ptr = try alloc.alloc(u8, text84_yes_str.len);
-    std.mem.copyBackwards(u8, text84_yes_ptr, text84_yes_str);
+    @memcpy(text84_yes_ptr, text84_yes_str);
 
     const expected_tokens = [_]Token{
-        try Token.create_identifier(alloc, identifier_ptr),
+        try Token.createIdentifier(alloc, identifier_ptr),
         Token{ .variant = TokenVariants.add },
-        try Token.create_number(alloc, 1234),
+        try Token.createNumber(alloc, 1234),
         Token{ .variant = TokenVariants.lpar },
-        try Token.create_identifier(alloc, text84_yes_ptr),
+        try Token.createIdentifier(alloc, text84_yes_ptr),
         Token{ .variant = TokenVariants.div },
-        try Token.create_number(alloc, 94.40),
+        try Token.createNumber(alloc, 94.40),
         Token{ .variant = TokenVariants.rpar },
         Token{ .variant = TokenVariants.add },
-        try Token.create_number(alloc, 0.88),
+        try Token.createNumber(alloc, 0.88),
         Token{ .variant = TokenVariants.eof },
     };
 

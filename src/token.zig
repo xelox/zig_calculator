@@ -33,11 +33,11 @@ pub const Token = struct {
         _ = options;
         switch (self.variant) {
             TokenVariants.identifier => {
-                const str = try self.get_identifier();
+                const str = try self.getIdentifier();
                 try writer.print("Token({s}, {s})", .{ @tagName(self.variant), str });
             },
             TokenVariants.number => {
-                const num = try self.get_number();
+                const num = try self.getNumber();
                 try writer.print("Token({s}, {d})", .{ @tagName(self.variant), num });
             },
             else => {
@@ -46,11 +46,11 @@ pub const Token = struct {
         }
     }
 
-    pub fn create_basic(variant: TokenVariants) Token {
+    pub fn createBasic(variant: TokenVariants) Token {
         return Token{ .variant = variant };
     }
 
-    pub fn create_number(alloc: Allocator, value: f64) !Token {
+    pub fn createNumber(alloc: Allocator, value: f64) !Token {
         return Token{
             .variant = TokenVariants.number,
             .value = TokenValue{ .number = try Rc(f64).init(alloc, value) },
@@ -58,19 +58,19 @@ pub const Token = struct {
     }
 
     /// Create an identifier by taking ownership of heap allocated memory
-    pub fn create_identifier(alloc: Allocator, value: []const u8) !Token {
+    pub fn createIdentifier(alloc: Allocator, value: []const u8) !Token {
         return Token{
             .variant = TokenVariants.identifier,
             .value = TokenValue{ .string = try Rc([]u8).manage(alloc, @constCast(value)) },
         };
     }
 
-    pub fn get_number(self: *const Token) !f64 {
+    pub fn getNumber(self: *const Token) !f64 {
         if (self.value == null) return TokenError.BadGetNumber;
         return self.value.?.number.data.*;
     }
 
-    pub fn get_identifier(self: *const Token) ![]u8 {
+    pub fn getIdentifier(self: *const Token) ![]u8 {
         if (self.value == null) return TokenError.BadGetIdentifier;
         return self.value.?.string.data;
     }
@@ -104,13 +104,13 @@ pub const Token = struct {
 test "number tokens" {
     const alloc = std.testing.allocator;
 
-    const token42 = try Token.create_number(alloc, 42.0);
+    const token42 = try Token.createNumber(alloc, 42.0);
     defer token42.destroy(alloc);
 
-    const token42val = try token42.get_number();
+    const token42val = try token42.getNumber();
     try std.testing.expectEqual(token42val, 42.0);
 
-    const other = try Token.create_number(alloc, 42.0);
+    const other = try Token.createNumber(alloc, 42.0);
     defer other.destroy(alloc);
 
     try std.testing.expect(token42.eql(&other));
@@ -123,19 +123,19 @@ test "identifier tokens" {
 
     const hello_ptr1 = try alloc.alloc(u8, hello_world.len);
     std.mem.copyBackwards(u8, hello_ptr1, hello_world);
-    const rhs_token = try Token.create_identifier(alloc, hello_ptr1);
+    const rhs_token = try Token.createIdentifier(alloc, hello_ptr1);
     defer rhs_token.destroy(alloc);
 
     const hello_ptr2 = try alloc.alloc(u8, hello_world.len);
     std.mem.copyBackwards(u8, hello_ptr2, hello_world);
-    const lhs_token = try Token.create_identifier(alloc, hello_ptr2);
+    const lhs_token = try Token.createIdentifier(alloc, hello_ptr2);
     defer lhs_token.destroy(alloc);
 
     try std.testing.expect(rhs_token.eql(&lhs_token));
 
     const other_ptr = try alloc.alloc(u8, 3);
     std.mem.copyBackwards(u8, other_ptr, "xyz");
-    const other_token = try Token.create_identifier(alloc, other_ptr);
+    const other_token = try Token.createIdentifier(alloc, other_ptr);
     defer other_token.destroy(alloc);
 
     try std.testing.expect(!rhs_token.eql(&other_token));
@@ -151,10 +151,10 @@ test "token equality" {
     try std.testing.expect(mul.eql(&other_mul));
     try std.testing.expect(!mul.eql(&not_mul));
 
-    const a = try Token.create_number(alloc, 69);
+    const a = try Token.createNumber(alloc, 69);
     defer a.destroy(alloc);
 
-    const b = try Token.create_number(alloc, 420);
+    const b = try Token.createNumber(alloc, 420);
     defer b.destroy(alloc);
 
     try std.testing.expect(!a.eql(&b));
