@@ -41,17 +41,10 @@ pub const Token = union(Variants) {
         _ = fmt;
         _ = options;
         switch (self) {
-            .identifier => {
-                const str = try self.getIdentifier();
-                try writer.print("Token({s}, {s})", .{ @tagName(self.variant), str });
-            },
-            .number => {
-                const num = try self.getNumber();
-                try writer.print("Token({s}, {d})", .{ @tagName(self.variant), num });
-            },
-            else => {
-                try writer.print("Token({s}, null)", .{@tagName(self.variant)});
-            },
+            .identifier => try writer.print("Id({s})", .{try self.getIdentifier()}),
+            .number => try writer.print("Num({d})", .{try self.getNumber()}),
+            .add, .sub, .mul, .div => try writer.print("Op({s})", .{@tagName(self.variant())}),
+            else => try writer.print("Simb({s})", .{@tagName(self.variant())}),
         }
     }
 
@@ -69,8 +62,8 @@ pub const Token = union(Variants) {
         }
     }
 
-    pub fn createBasic(variant: Variants) !Token {
-        return switch (variant) {
+    pub fn createBasic(v: Variants) !Token {
+        return switch (v) {
             .add => .{ .add = {} },
             .sub => .{ .sub = {} },
             .mul => .{ .mul = {} },
@@ -125,6 +118,10 @@ pub const Token = union(Variants) {
             },
             else => return true,
         }
+    }
+
+    pub fn variant(self: *const Token) Variants {
+        return std.meta.activeTag(self.*);
     }
 };
 
