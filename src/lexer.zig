@@ -1,15 +1,13 @@
 const std = @import("std");
 
-const token_module = @import("token.zig");
-const Token = token_module.Token;
-const TokenVariants = token_module.TokenVariants;
+const t = @import("token.zig");
 
-const LexerErrors = error{
+pub const LexerErrors = error{
     TooManyDotsInNumber,
     UnknwonSymbolInSequence,
 };
 
-const Lexer = struct {
+pub const Lexer = struct {
     input: []const u8,
     pos: usize = 0,
     current_char: ?u8 = null,
@@ -41,7 +39,7 @@ const Lexer = struct {
     }
     fn identifier(self: *Lexer) ![]u8 {
         var identifier_str = std.ArrayList(u8).init(self.alloc);
-        defer identifier_str.deinit();
+        errdefer identifier_str.deinit();
 
         while (self.current_char != null and (std.ascii.isAlphanumeric(self.current_char.?) or self.current_char.? == '_')) {
             try identifier_str.append(self.current_char.?);
@@ -68,19 +66,19 @@ const Lexer = struct {
         if (self.current_char != null) self.pos -= 1;
         return std.fmt.parseFloat(f64, number_str.items);
     }
-    pub fn nextToken(self: *Lexer) !Token {
+    pub fn nextToken(self: *Lexer) !t.Token {
         self.skipWitespace();
         self.advance();
-        if (self.current_char == null) return Token{ .variant = TokenVariants.eof };
+        if (self.current_char == null) return try t.Token.createBasic(t.Variants.eof);
         return switch (self.current_char.?) {
-            '+' => Token.createBasic(TokenVariants.add),
-            '-' => Token.createBasic(TokenVariants.sub),
-            '*' => Token.createBasic(TokenVariants.mul),
-            '/' => Token.createBasic(TokenVariants.div),
-            '(' => Token.createBasic(TokenVariants.lpar),
-            ')' => Token.createBasic(TokenVariants.rpar),
-            'a'...'z', 'A'...'Z', '_' => try Token.createIdentifier(self.alloc, try self.identifier()),
-            '0'...'9', '.' => try Token.createNumber(self.alloc, try self.number()),
+            '+' => try t.Token.createBasic(t.Variants.add),
+            '-' => try t.Token.createBasic(t.Variants.sub),
+            '*' => try t.Token.createBasic(t.Variants.mul),
+            '/' => try t.Token.createBasic(t.Variants.div),
+            '(' => try t.Token.createBasic(t.Variants.lpar),
+            ')' => try t.Token.createBasic(t.Variants.rpar),
+            'a'...'z', 'A'...'Z', '_' => try t.Token.createIdentifier(self.alloc, try self.identifier(), false),
+            '0'...'9', '.' => try t.Token.createNumber(self.alloc, try self.number()),
             else => LexerErrors.UnknwonSymbolInSequence,
         };
     }
@@ -92,28 +90,20 @@ test "complete lexer test" {
     const alloc = std.testing.allocator;
 
     const input: []const u8 = "   identifier +   1234 (   text84_yes/94.40 ) + .88   ";
+
     var lexer = Lexer{ .input = input, .alloc = alloc };
 
-    const identifier_str = "identifier";
-    const identifier_ptr = try alloc.alloc(u8, identifier_str.len);
-    @memcpy(identifier_ptr, identifier_str);
-
-    const text84_yes_str = "text84_yes";
-    const text84_yes_ptr = try alloc.alloc(u8, text84_yes_str.len);
-    @memcpy(text84_yes_ptr, text84_yes_str);
-
-    const expected_tokens = [_]Token{
-        try Token.createIdentifier(alloc, identifier_ptr),
-        Token{ .variant = TokenVariants.add },
-        try Token.createNumber(alloc, 1234),
-        Token{ .variant = TokenVariants.lpar },
-        try Token.createIdentifier(alloc, text84_yes_ptr),
-        Token{ .variant = TokenVariants.div },
-        try Token.createNumber(alloc, 94.40),
-        Token{ .variant = TokenVariants.rpar },
-        Token{ .variant = TokenVariants.add },
-        try Token.createNumber(alloc, 0.88),
-        Token{ .variant = TokenVariants.eof },
+    const expected_tokens = [_]t.Token{
+        try t.Token.createIdentifier(alloc, "identifier", true),
+        try t.Token.createBasic(t.Variants.add),
+        try t.Token.createNumber(alloc, 1234),
+        try t.Token.createBasic(t.Variants.lpar),
+        try t.Token.createIdentifier(alloc, "text84_yes", true),
+        try t.Token.createBasic(t.Variants.div),
+        try t.Token.createNumber(alloc, 94.40),
+        try t.Token.createBasic(t.Variants.rpar),
+        try t.Token.createBasic(t.Variants.add),
+        try t.Token.createNumber(alloc, 0.88),
     };
 
     for (&expected_tokens) |*expected| {

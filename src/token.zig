@@ -2,41 +2,50 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Rc = @import("ref_counter.zig").Rc;
 
-pub const TokenVariants = enum {
+pub const Variants = enum {
+    //void/symbolic variants
     add,
     sub,
     mul,
     div,
     lpar,
     rpar,
-    number,
-    identifier,
     eof,
+
+    //variants with data
+    number,
+    string,
+    identifier,
 };
 
-pub const TokenError = error{
+pub const Error = error{
     BadGetNumber,
     BadGetIdentifier,
+    NonVoidVariant,
 };
 
-pub const TokenValue = union(enum) {
-    string: Rc([]u8),
+pub const Token = union(Variants) {
+    add: void,
+    sub: void,
+    mul: void,
+    div: void,
+    lpar: void,
+    rpar: void,
+    eof: void,
+
     number: Rc(f64),
-};
-
-pub const Token = struct {
-    variant: TokenVariants,
-    value: ?TokenValue = null,
+    string: Rc([]u8),
+    identifier: Rc([]u8),
 
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        switch (self.variant) {
-            TokenVariants.identifier => {
+        switch (self) {
+            .identifier => {
                 const str = try self.getIdentifier();
                 try writer.print("Token({s}, {s})", .{ @tagName(self.variant), str });
             },
-            TokenVariants.number => {
+            .number => {
                 const num = try self.getNumber();
                 try writer.print("Token({s}, {d})", .{ @tagName(self.variant), num });
             },
@@ -46,54 +55,72 @@ pub const Token = struct {
         }
     }
 
-    pub fn createBasic(variant: TokenVariants) Token {
-        return Token{ .variant = variant };
-    }
-
-    pub fn createNumber(alloc: Allocator, value: f64) !Token {
-        return Token{
-            .variant = TokenVariants.number,
-            .value = TokenValue{ .number = try Rc(f64).init(alloc, value) },
-        };
-    }
-
-    /// Create an identifier by taking ownership of heap allocated memory
-    pub fn createIdentifier(alloc: Allocator, value: []const u8) !Token {
-        return Token{
-            .variant = TokenVariants.identifier,
-            .value = TokenValue{ .string = try Rc([]u8).manage(alloc, @constCast(value)) },
-        };
-    }
-
     pub fn getNumber(self: *const Token) !f64 {
-        if (self.value == null) return TokenError.BadGetNumber;
-        return self.value.?.number.data.*;
+        switch (self.*) {
+            .number => return self.number.data.*,
+            else => return Error.BadGetNumber,
+        }
     }
 
     pub fn getIdentifier(self: *const Token) ![]u8 {
-        if (self.value == null) return TokenError.BadGetIdentifier;
-        return self.value.?.string.data;
+        switch (self.*) {
+            .identifier => return self.identifier.data,
+            else => return Error.BadGetIdentifier,
+        }
     }
 
-    pub fn destroy(self: *const Token, alloc: Allocator) void {
-        if (self.value == null) return;
-        switch (self.value.?) {
-            .number => |num| num.release(alloc),
-            .string => |str| str.release(alloc),
+    pub fn createBasic(variant: Variants) !Token {
+        return switch (variant) {
+            .add => .{ .add = {} },
+            .sub => .{ .sub = {} },
+            .mul => .{ .mul = {} },
+            .div => .{ .div = {} },
+            .lpar => .{ .lpar = {} },
+            .rpar => .{ .rpar = {} },
+            .eof => .{ .eof = {} },
+            else => Error.NonVoidVariant,
+        };
+    }
+
+    pub fn createNumber(alloc: Allocator, value: f64) !Token {
+        return .{ .number = try Rc(f64).init(alloc, value) };
+    }
+
+    /// Create an identifier, if copy is false the return Token will take ownership of the slice, if true it will copy it.
+    pub fn createIdentifier(alloc: Allocator, value: []const u8, copy: bool) !Token {
+        if (copy) return .{ .identifier = try Rc([]u8).init(alloc, @constCast(value)) };
+        return .{ .identifier = try Rc([]u8).manage(alloc, @constCast(value)) };
+    }
+
+    pub fn clone(self: *const Token) Token {
+        return switch (self.*) {
+            .number => |value| .{ .number = value.clone() },
+            .string => |value| .{ .string = value.clone() },
+            .identifier => |value| .{ .identifier = value.clone() },
+            else => self.*,
+        };
+    }
+
+    pub fn destroy(self: *const @This(), alloc: Allocator) void {
+        switch (self.*) {
+            .number => |item| item.release(alloc),
+            .string => |item| item.release(alloc),
+            .identifier => |item| item.release(alloc),
+            else => {},
         }
     }
 
     pub fn eql(self: *const Token, rhs: *const Token) bool {
-        if (self.variant != rhs.variant) return false;
-        switch (self.variant) {
-            TokenVariants.number => {
-                const lhs_value: f64 = self.value.?.number.data.*;
-                const rhs_value: f64 = rhs.value.?.number.data.*;
+        if (std.meta.activeTag(self.*) != std.meta.activeTag(rhs.*)) return false;
+        switch (self.*) {
+            .number => {
+                const lhs_value: f64 = self.number.data.*;
+                const rhs_value: f64 = rhs.number.data.*;
                 return lhs_value == rhs_value;
             },
-            TokenVariants.identifier => {
-                const lhs_value: []u8 = self.value.?.string.data;
-                const rhs_value: []u8 = rhs.value.?.string.data;
+            .identifier => {
+                const lhs_value: []u8 = self.identifier.data;
+                const rhs_value: []u8 = rhs.identifier.data;
                 return std.mem.eql(u8, lhs_value, rhs_value);
             },
             else => return true,
@@ -123,19 +150,19 @@ test "identifier tokens" {
 
     const hello_ptr1 = try alloc.alloc(u8, hello_world.len);
     std.mem.copyBackwards(u8, hello_ptr1, hello_world);
-    const rhs_token = try Token.createIdentifier(alloc, hello_ptr1);
+    const rhs_token = try Token.createIdentifier(alloc, hello_ptr1, false);
     defer rhs_token.destroy(alloc);
 
     const hello_ptr2 = try alloc.alloc(u8, hello_world.len);
     std.mem.copyBackwards(u8, hello_ptr2, hello_world);
-    const lhs_token = try Token.createIdentifier(alloc, hello_ptr2);
+    const lhs_token = try Token.createIdentifier(alloc, hello_ptr2, false);
     defer lhs_token.destroy(alloc);
 
     try std.testing.expect(rhs_token.eql(&lhs_token));
 
     const other_ptr = try alloc.alloc(u8, 3);
     std.mem.copyBackwards(u8, other_ptr, "xyz");
-    const other_token = try Token.createIdentifier(alloc, other_ptr);
+    const other_token = try Token.createIdentifier(alloc, other_ptr, false);
     defer other_token.destroy(alloc);
 
     try std.testing.expect(!rhs_token.eql(&other_token));
@@ -144,9 +171,9 @@ test "identifier tokens" {
 test "token equality" {
     const alloc = std.testing.allocator;
 
-    const mul = Token{ .variant = TokenVariants.mul };
-    const other_mul = Token{ .variant = TokenVariants.mul };
-    const not_mul = Token{ .variant = TokenVariants.add };
+    const mul = try Token.createBasic(Variants.mul);
+    const other_mul = try Token.createBasic(Variants.mul);
+    const not_mul = try Token.createBasic(Variants.add);
 
     try std.testing.expect(mul.eql(&other_mul));
     try std.testing.expect(!mul.eql(&not_mul));
