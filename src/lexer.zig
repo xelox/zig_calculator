@@ -27,7 +27,7 @@ const Lexer = struct {
         if (pos >= self.input.len) return null;
         return self.input[pos];
     }
-    fn skip_whitespace(self: *Lexer) void {
+    fn skipWitespace(self: *Lexer) void {
         while (self.pos < self.input.len) {
             const char = self.input[self.pos];
             if (!std.ascii.isWhitespace(char)) break;
@@ -68,8 +68,8 @@ const Lexer = struct {
         if (self.current_char != null) self.pos -= 1;
         return std.fmt.parseFloat(f64, number_str.items);
     }
-    pub fn next_token(self: *Lexer) !Token {
-        self.skip_whitespace();
+    pub fn nextToken(self: *Lexer) !Token {
+        self.skipWitespace();
         self.advance();
         if (self.current_char == null) return Token{ .variant = TokenVariants.eof };
         return switch (self.current_char.?) {
@@ -117,7 +117,7 @@ test "complete lexer test" {
     };
 
     for (&expected_tokens) |*expected| {
-        const token = try lexer.next_token();
+        const token = try lexer.nextToken();
         try std.testing.expect(token.eql(expected));
 
         token.destroy(alloc);
