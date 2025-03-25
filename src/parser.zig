@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Lexer = @import("lexer.zig").Lexer;
 const Rc = @import("ref_counter.zig").Rc;
@@ -11,8 +12,8 @@ const Error = error{
     UnexpectedToken,
 };
 
-const Parser = struct {
-    lexer: Lexer,
+pub const Parser = struct {
+    lexer: Lexer = undefined,
     current_token: t.Token = undefined,
     alloc: std.mem.Allocator,
 
@@ -90,7 +91,8 @@ const Parser = struct {
         return node;
     }
 
-    pub fn parse(self: *Parser) AST.Node {
+    pub fn parse(self: *Parser, input: []const u8) AST.Node {
+        self.lexer = Lexer{ .input = input, .alloc = self.alloc };
         self.current_token = self.lexer.nextToken() catch |e| std.debug.panic("{any}", .{e});
         return self.expr();
     }
@@ -98,7 +100,9 @@ const Parser = struct {
 
 test "simple test" {
     const alloc = std.testing.allocator;
-    var parser = Parser{ .alloc = alloc, .lexer = .{ .alloc = alloc, .input = "2 + 7 * 3" } };
+    const input = "2 + 7 * 3";
+
+    var parser = Parser{ .alloc = alloc };
 
     // TWO (2)
     const two_token = try t.Token.createNumber(alloc, 2);
@@ -151,7 +155,7 @@ test "simple test" {
 
     // Parse Result:
 
-    const root = parser.parse();
+    const root = parser.parse(input);
     defer root.destroy(alloc);
 
     var actual_str = std.ArrayList(u8).init(alloc);
