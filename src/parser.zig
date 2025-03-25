@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const panic = std.debug.panic;
 
 const Lexer = @import("lexer.zig").Lexer;
 const Rc = @import("ref_counter.zig").Rc;
@@ -20,9 +21,9 @@ pub const Parser = struct {
     fn eat(self: *Parser, variant: t.Variants) void {
         if (self.current_token.variant() == variant) {
             self.current_token.destroy(self.alloc);
-            self.current_token = self.lexer.nextToken() catch |e| std.debug.panic("{any}", .{e});
+            self.current_token = self.lexer.nextToken() catch |e| panic("{any}", .{e});
         } else {
-            return std.debug.panic("Unexpected Token", .{});
+            return panic("Unexpected Token", .{});
         }
     }
 
@@ -31,9 +32,15 @@ pub const Parser = struct {
         defer token.destroy(self.alloc);
 
         switch (token.variant()) {
+            .add, .sub => {
+                self.eat(token.variant());
+                const child = self.factor();
+                defer child.destroy(self.alloc);
+                return AST.Node.createUnaryOp(self.alloc, token, child) catch |e| panic("{any}", .{e});
+            },
             .number => {
                 self.eat(.number);
-                return AST.Node.createNumber(token) catch |e| std.debug.panic("{any}", .{e});
+                return AST.Node.createNumber(token) catch |e| panic("{any}", .{e});
             },
             .lpar => {
                 self.eat(.lpar);
@@ -41,7 +48,7 @@ pub const Parser = struct {
                 self.eat(.rpar);
                 return node;
             },
-            else => std.debug.panic("expected number token or lpar token, but got: {s}", .{@tagName(token.variant())}),
+            else => panic("expected number token or lpar token, but got: {s}", .{@tagName(token.variant())}),
         }
     }
 
@@ -62,7 +69,7 @@ pub const Parser = struct {
             const right = self.factor();
             defer right.destroy(self.alloc);
 
-            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| std.debug.panic("{any}", .{e});
+            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| panic("{any}", .{e});
         }
 
         return node;
@@ -85,7 +92,7 @@ pub const Parser = struct {
             const right = self.term();
             defer right.destroy(self.alloc);
 
-            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| std.debug.panic("{any}", .{e});
+            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| panic("{any}", .{e});
         }
 
         return node;
@@ -93,10 +100,45 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser, input: []const u8) AST.Node {
         self.lexer = Lexer{ .input = input, .alloc = self.alloc };
-        self.current_token = self.lexer.nextToken() catch |e| std.debug.panic("{any}", .{e});
+        self.current_token = self.lexer.nextToken() catch |e| panic("{any}", .{e});
         return self.expr();
     }
 };
+
+test "unary test" {
+    const alloc = std.testing.allocator;
+    var parser = Parser{ .alloc = alloc };
+    const root = parser.parse("---8");
+    defer root.destroy(alloc);
+
+    const num_token = try t.Token.createNumber(alloc, 8);
+    defer num_token.destroy(alloc);
+
+    const num_node = try AST.Node.createNumber(num_token);
+    defer num_node.destroy(alloc);
+
+    const minus_token = try t.Token.createBasic(t.Variants.sub);
+    defer minus_token.destroy(alloc);
+
+    const unary_1 = try AST.Node.createUnaryOp(alloc, minus_token, num_node);
+    defer unary_1.destroy(alloc);
+
+    const unary_2 = try AST.Node.createUnaryOp(alloc, minus_token, unary_1);
+    defer unary_2.destroy(alloc);
+
+    const unary_3 = try AST.Node.createUnaryOp(alloc, minus_token, unary_2);
+    defer unary_3.destroy(alloc);
+
+    var expected_str = std.ArrayList(u8).init(alloc);
+    defer expected_str.deinit();
+    try unary_3.print(expected_str.writer(), 0);
+
+    var actual_str = std.ArrayList(u8).init(alloc);
+    defer actual_str.deinit();
+    try root.print(actual_str.writer(), 0);
+
+    try std.testing.expectEqualSlices(u8, expected_str.items, actual_str.items);
+}
 
 test "simple test" {
     const alloc = std.testing.allocator;

@@ -299,3 +299,36 @@ test "AST multiple layers" {
     try std.testing.expectEqual(2, try l3.bin_op.left.bin_op.left.bin_op.right.number.token.getNumber());
     try std.testing.expectEqual(1, try l3.bin_op.left.bin_op.left.bin_op.left.number.token.getNumber());
 }
+
+test "AST unary_op" {
+    const alloc = std.testing.allocator;
+
+    const num_token = try t.Token.createNumber(alloc, 1);
+    defer num_token.destroy(alloc);
+
+    const minus_token = try t.Token.createBasic(t.Variants.sub);
+    defer minus_token.destroy(alloc);
+
+    const plus_token = try t.Token.createBasic(t.Variants.add);
+    defer plus_token.destroy(alloc);
+
+    const num_node = try Node.createNumber(num_token);
+    defer num_node.destroy(alloc);
+
+    const l1 = try Node.createUnaryOp(alloc, minus_token, num_node);
+    defer l1.destroy(alloc);
+
+    const l2 = try Node.createUnaryOp(alloc, plus_token, l1);
+    defer l2.destroy(alloc);
+
+    const l3 = try Node.createUnaryOp(alloc, minus_token, l2);
+    defer l3.destroy(alloc);
+
+    const l4 = try Node.createUnaryOp(alloc, plus_token, l3);
+    defer l4.destroy(alloc);
+
+    try std.testing.expectEqual(t.Variants.add, l4.unary_op.token.variant());
+    try std.testing.expectEqual(t.Variants.sub, l4.unary_op.operand.unary_op.token.variant());
+    try std.testing.expectEqual(t.Variants.add, l4.unary_op.operand.unary_op.operand.unary_op.token.variant());
+    try std.testing.expectEqual(t.Variants.sub, l4.unary_op.operand.unary_op.operand.unary_op.operand.unary_op.token.variant());
+}
