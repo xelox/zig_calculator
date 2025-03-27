@@ -71,6 +71,10 @@ pub const Lexer = struct {
         self.advance();
         if (self.current_char == null) return try t.Token.createBasic(t.Variants.eof);
         return switch (self.current_char.?) {
+            '{' => try t.Token.createBasic(t.Variants.begin),
+            '}' => try t.Token.createBasic(t.Variants.end),
+            '=' => try t.Token.createBasic(t.Variants.assign),
+            ';' => try t.Token.createBasic(t.Variants.semicolon),
             '+' => try t.Token.createBasic(t.Variants.add),
             '-' => try t.Token.createBasic(t.Variants.sub),
             '*' => try t.Token.createBasic(t.Variants.mul),
@@ -84,13 +88,12 @@ pub const Lexer = struct {
     }
 };
 
-test "complete lexer test" {
+test "v1 lexer" {
     // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     // const alloc = arena.allocator();
     const alloc = std.testing.allocator;
 
     const input: []const u8 = "   identifier +   1234 (   text84_yes/94.40 ) + .88   ";
-
     var lexer = Lexer{ .input = input, .alloc = alloc };
 
     const expected_tokens = [_]t.Token{
@@ -112,5 +115,37 @@ test "complete lexer test" {
 
         token.destroy(alloc);
         expected.destroy(alloc);
+    }
+}
+
+test "v2 lexer" {
+    const alloc = std.testing.allocator;
+
+    const input = "{ x = 23 + 4; y = x / 2; }";
+    var lexer = Lexer{ .input = input, .alloc = alloc };
+
+    const expected_tokens = [_]t.Token{
+        try t.Token.createBasic(t.Variants.begin),
+        try t.Token.createIdentifier(alloc, "x", true),
+        try t.Token.createBasic(t.Variants.assign),
+        try t.Token.createNumber(alloc, 23),
+        try t.Token.createBasic(t.Variants.add),
+        try t.Token.createNumber(alloc, 4),
+        try t.Token.createBasic(t.Variants.semicolon),
+        try t.Token.createIdentifier(alloc, "y", true),
+        try t.Token.createBasic(t.Variants.assign),
+        try t.Token.createIdentifier(alloc, "x", true),
+        try t.Token.createBasic(t.Variants.div),
+        try t.Token.createNumber(alloc, 2),
+        try t.Token.createBasic(t.Variants.semicolon),
+        try t.Token.createBasic(t.Variants.end),
+    };
+
+    for (&expected_tokens) |*expected| {
+        const token = try lexer.nextToken();
+        try std.testing.expect(token.eql(expected));
+
+        expected.destroy(alloc);
+        token.destroy(alloc);
     }
 }

@@ -3,7 +3,12 @@ const Allocator = std.mem.Allocator;
 const Rc = @import("ref_counter.zig").Rc;
 
 pub const Variants = enum {
-    //void/symbolic variants
+    //statements
+    begin,
+    end,
+    semicolon,
+
+    //expr symbols
     add,
     sub,
     mul,
@@ -12,10 +17,11 @@ pub const Variants = enum {
     rpar,
     eof,
 
-    //variants with data
+    //variables
     number,
     string,
     identifier,
+    assign,
 };
 
 pub const Error = error{
@@ -25,6 +31,10 @@ pub const Error = error{
 };
 
 pub const Token = union(Variants) {
+    begin: void,
+    end: void,
+    semicolon: void,
+
     add: void,
     sub: void,
     mul: void,
@@ -36,6 +46,7 @@ pub const Token = union(Variants) {
     number: Rc(f64),
     string: Rc([]u8),
     identifier: Rc([]u8),
+    assign: void,
 
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
@@ -64,6 +75,10 @@ pub const Token = union(Variants) {
 
     pub fn createBasic(v: Variants) !Token {
         return switch (v) {
+            .begin => .{ .begin = {} },
+            .end => .{ .end = {} },
+            .semicolon => .{ .semicolon = {} },
+            .assign => .{ .assign = {} },
             .add => .{ .add = {} },
             .sub => .{ .sub = {} },
             .mul => .{ .mul = {} },

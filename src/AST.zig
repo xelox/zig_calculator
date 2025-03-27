@@ -3,12 +3,15 @@ const std = @import("std");
 const t = @import("token.zig");
 const Rc = @import("ref_counter.zig").Rc;
 
-pub const Num = struct {
-    token: t.Token,
-};
+pub const Num = struct { token: t.Token };
+const Compund = struct { children: []Node };
+pub const Var = struct { token: t.Token };
+pub const NoOp = struct {};
 
-pub const Id = struct {
+pub const AssignOp = struct {
     token: t.Token,
+    left: *Node,
+    right: *Node,
 };
 
 pub const BinOp = struct {
@@ -23,19 +26,24 @@ pub const UnaryOp = struct {
 };
 
 pub const Node = union(enum) {
-    number: Num,
-    identifier: Id,
-    bin_op: BinOp,
-    unary_op: UnaryOp,
+    // zig fmt: off
+    number: Num,            // [x]
+    bin_op: BinOp,          // [x]
+    unary_op: UnaryOp,      // [x]
+    compound: Compund,      // [x]
+    assign_op: AssignOp,    // [x]
+    variable: Var,          // [x]
+    noop: NoOp,             // [x]
+    // zig fmt: on
 
     pub fn createNumber(token: t.Token) !Node {
         if (token.variant() != t.Variants.number) return Error.BadTokenForNodeType;
         return Node{ .number = Num{ .token = token.clone() } };
     }
 
-    pub fn createIdentifier(token: t.Token) !Node {
+    pub fn createVar(token: t.Token) !Node {
         if (token.variant() != t.Variants.identifier) return Error.BadTokenForNodeType;
-        return Node{ .identifier = Id{ .token = token.clone() } };
+        return Node{ .variable = Var{ .token = token.clone() } };
     }
 
     pub fn createBinOp(alloc: std.mem.Allocator, token: t.Token, left: Node, right: Node) !Node {
@@ -63,7 +71,7 @@ pub const Node = union(enum) {
 
     pub fn createUnaryOp(alloc: std.mem.Allocator, token: t.Token, operand: Node) !Node {
         switch (token.variant()) {
-            t.Variants.add, t.Variants.sub => {},
+            .add, .sub => {},
             else => return Error.BadTokenForNodeType,
         }
 
@@ -80,13 +88,69 @@ pub const Node = union(enum) {
         };
     }
 
+    pub fn createNoOp() Node {
+        return Node{ .noop = {} };
+    }
+
+    /// Takes ownership of the children slice
+    pub fn createCompound(children: []Node) !Node {
+        return Node{ .compound = .{ .children = children } };
+    }
+
+    pub fn createAssign(alloc: std.mem.Allocator, token: t.Token, left: Node, right: Node) !Node {
+        switch (token.variant()) {
+            .assign => {},
+            else => return Error.BadTokenForNodeType,
+        }
+
+        const left_ptr = try alloc.create(Node);
+        errdefer alloc.destroy(left_ptr);
+        left_ptr.* = try left.clone(alloc);
+
+        const right_ptr = try alloc.create(Node);
+        errdefer alloc.destroy(right_ptr);
+        right_ptr.* = try right.clone(alloc);
+
+        return Node{
+            .assign_op = AssignOp{
+                .left = left_ptr,
+                .right = right_ptr,
+                .token = token.clone(),
+            },
+        };
+    }
+
     pub fn clone(self: *const Node, alloc: std.mem.Allocator) !Node {
         switch (self.*) {
+            .compound => |item| {
+                const slice = try alloc.alloc(Node, item.children.len);
+                errdefer alloc.free(slice);
+
+                for (slice, item.children) |*dest, *src| {
+                    dest.* = try src.clone(alloc);
+                }
+                return Node{ .compound = .{ .children = slice } };
+            },
             .number => |item| {
                 return Node{ .number = .{ .token = item.token.clone() } };
             },
-            .identifier => |item| {
-                return Node{ .identifier = .{ .token = item.token.clone() } };
+            .variable => |item| {
+                return Node{ .variable = .{ .token = item.token.clone() } };
+            },
+            .assign_op => |item| {
+                const left_ptr = try alloc.create(Node);
+                errdefer alloc.destroy(left_ptr);
+                left_ptr.* = try item.left.clone(alloc);
+
+                const right_ptr = try alloc.create(Node);
+                errdefer alloc.destroy(right_ptr);
+                right_ptr.* = try item.right.clone(alloc);
+
+                return Node{ .assign_op = AssignOp{
+                    .token = item.token.clone(),
+                    .left = left_ptr,
+                    .right = right_ptr,
+                } };
             },
             .bin_op => |item| {
                 const left_ptr = try alloc.create(Node);
@@ -113,12 +177,28 @@ pub const Node = union(enum) {
                     .operand = operand_ptr,
                 } };
             },
+            .noop => {
+                return Node{ .noop = NoOp{} };
+            },
         }
     }
 
     pub fn destroy(self: *const Node, alloc: std.mem.Allocator) void {
         switch (self.*) {
+            .compound => |item| {
+                for (item.children) |child| {
+                    child.destroy(alloc);
+                }
+                alloc.free(item.children);
+            },
             .bin_op => |item| {
+                item.token.destroy(alloc);
+                item.left.destroy(alloc);
+                item.right.destroy(alloc);
+                alloc.destroy(item.left);
+                alloc.destroy(item.right);
+            },
+            .assign_op => |item| {
                 item.token.destroy(alloc);
                 item.left.destroy(alloc);
                 item.right.destroy(alloc);
@@ -131,7 +211,8 @@ pub const Node = union(enum) {
                 alloc.destroy(item.operand);
             },
             .number => |item| item.token.destroy(alloc),
-            .identifier => |item| item.token.destroy(alloc),
+            .variable => |item| item.token.destroy(alloc),
+            .noop => {},
         }
     }
 
@@ -144,8 +225,23 @@ pub const Node = union(enum) {
             .number => |item| {
                 try writer.print("{}\n", .{item.token});
             },
-            .identifier => |item| {
+            .variable => |item| {
                 try writer.print("{}\n", .{item.token});
+            },
+            .compound => |item| {
+                try writer.print("Begin\n", .{});
+                for (item.children) |child| {
+                    try child.print(writer, indent + 1);
+                }
+                for (0..indent) |_| {
+                    try writer.print("    ", .{});
+                }
+                try writer.print("End\n", .{});
+            },
+            .assign_op => |item| {
+                try writer.print("{}\n", .{item.token});
+                try item.left.print(writer, indent + 1);
+                try item.right.print(writer, indent + 1);
             },
             .bin_op => |item| {
                 try writer.print("{}\n", .{item.token});
@@ -155,6 +251,9 @@ pub const Node = union(enum) {
             .unary_op => |item| {
                 try writer.print("{}\n", .{item.token});
                 try item.operand.print(writer, indent + 1);
+            },
+            .noop => {
+                try writer.print("noop\n", .{});
             },
         }
     }
@@ -189,7 +288,7 @@ test "AST identifier nodes" {
     const identifier_token = try t.Token.createIdentifier(alloc, "hello", true);
     defer identifier_token.destroy(alloc);
 
-    const identifier_node = try Node.createIdentifier(identifier_token);
+    const identifier_node = try Node.createVar(identifier_token);
     defer identifier_node.destroy(alloc);
 
     const clone_1 = try identifier_node.clone(alloc);
@@ -331,4 +430,94 @@ test "AST unary_op" {
     try std.testing.expectEqual(t.Variants.sub, l4.unary_op.operand.unary_op.token.variant());
     try std.testing.expectEqual(t.Variants.add, l4.unary_op.operand.unary_op.operand.unary_op.token.variant());
     try std.testing.expectEqual(t.Variants.sub, l4.unary_op.operand.unary_op.operand.unary_op.operand.unary_op.token.variant());
+}
+
+test "AST statements" {
+    const alloc = std.testing.allocator;
+    // { x = 23 + 4; { y = x / 2; z = y + 4 } }
+
+    const assign_token = try t.Token.createBasic(t.Variants.assign);
+    defer assign_token.destroy(alloc);
+
+    const add_token = try t.Token.createBasic(t.Variants.add);
+    defer add_token.destroy(alloc);
+
+    const div_token = try t.Token.createBasic(t.Variants.div);
+    defer div_token.destroy(alloc);
+
+    const num_token_23 = try t.Token.createNumber(alloc, 23);
+    defer num_token_23.destroy(alloc);
+    const num_node_23 = try Node.createNumber(num_token_23);
+    defer num_node_23.destroy(alloc);
+
+    const num_token_4 = try t.Token.createNumber(alloc, 4);
+    defer num_token_4.destroy(alloc);
+    const num_node_4 = try Node.createNumber(num_token_4);
+    defer num_node_4.destroy(alloc);
+
+    const num_token_2 = try t.Token.createNumber(alloc, 2);
+    defer num_token_2.destroy(alloc);
+    const num_node_2 = try Node.createNumber(num_token_2);
+    defer num_node_2.destroy(alloc);
+
+    const x_token = try t.Token.createIdentifier(alloc, "x", true);
+    defer x_token.destroy(alloc);
+
+    const y_token = try t.Token.createIdentifier(alloc, "y", true);
+    defer y_token.destroy(alloc);
+
+    const z_token = try t.Token.createIdentifier(alloc, "z", true);
+    defer z_token.destroy(alloc);
+
+    const x_var_node = try Node.createVar(x_token);
+    defer x_var_node.destroy(alloc);
+
+    const y_var_node = try Node.createVar(y_token);
+    defer y_var_node.destroy(alloc);
+
+    const z_var_node = try Node.createVar(z_token);
+    defer z_var_node.destroy(alloc);
+
+    const bin_add_node = try Node.createBinOp(alloc, add_token, num_node_23, num_node_4);
+    defer bin_add_node.destroy(alloc);
+
+    const bin_div_node = try Node.createBinOp(alloc, div_token, x_var_node, num_node_2);
+    defer bin_div_node.destroy(alloc);
+
+    const bin_y_add_4_node = try Node.createBinOp(alloc, add_token, y_var_node, num_node_4);
+    defer bin_y_add_4_node.destroy(alloc);
+
+    const x_assign = try Node.createAssign(alloc, assign_token, x_var_node, bin_add_node);
+    defer x_assign.destroy(alloc);
+
+    const y_assign = try Node.createAssign(alloc, assign_token, y_var_node, bin_div_node);
+    defer y_assign.destroy(alloc);
+
+    const z_assign = try Node.createAssign(alloc, assign_token, z_var_node, bin_y_add_4_node);
+    defer z_assign.destroy(alloc);
+
+    var inner_compound_list = try alloc.alloc(Node, 2);
+    inner_compound_list[0] = try y_assign.clone(alloc);
+    inner_compound_list[1] = try z_assign.clone(alloc);
+    const inner_compound_node = try Node.createCompound(inner_compound_list);
+    defer inner_compound_node.destroy(alloc);
+
+    var compund_list = try alloc.alloc(Node, 2);
+    compund_list[0] = try x_assign.clone(alloc);
+    compund_list[1] = try inner_compound_node.clone(alloc);
+    const compound_node = try Node.createCompound(compund_list);
+    defer compound_node.destroy(alloc);
+
+    const compound_clone = try compound_node.clone(alloc);
+    defer compound_clone.destroy(alloc);
+
+    var str_1 = std.ArrayList(u8).init(alloc);
+    defer str_1.deinit();
+    try compound_node.print(str_1.writer(), 0);
+
+    var str_2 = std.ArrayList(u8).init(alloc);
+    defer str_2.deinit();
+    try compound_clone.print(str_2.writer(), 0);
+
+    std.debug.print("{s}", .{str_1.items});
 }
