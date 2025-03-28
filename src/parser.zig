@@ -28,23 +28,64 @@ pub const Parser = struct {
         }
     }
 
-    // fn program(sefl: *Parser) !AST.Node {
-    //     const node = self.compund_statement()
-    //     self.eat(t.Variants.eof);
-    //     return node;
-    // }
-    //
-    // fn compund_statement(self: *Parser) !AST.Node {
-    //     self.eat(t.Variants.begin);
-    //     const nodes = self.statement_list();
-    //     self.eat(t.Variants.end);
-    //     root = try AST.Node.createCompound(nodes);
-    // }
-    //
-    // fn statement_list(self: *Parser) []AST.Node {
-    //     const list = std.ArrayList(AST.Node).init(self.alloc);
-    //
-    // }
+    fn program(self: *Parser) !AST.Node {
+        const node = try self.compund_statement();
+        try self.eat(.eof);
+        return node;
+    }
+
+    fn compund_statement(self: *Parser) !AST.Node {
+        try self.eat(.begin);
+        const nodes = try self.statement_list();
+        try self.eat(.end);
+        return AST.Node.createCompound(nodes);
+    }
+
+    fn statement_list(self: *Parser) ![]AST.Node {
+        var list = std.ArrayList(AST.Node).init(self.alloc);
+        errdefer {
+            for (list.items) |*child| {
+                child.destroy(self.alloc);
+            }
+            list.deinit();
+        }
+
+        try list.append(try self.statement());
+        while (self.current_token.variant() == .semicolon) {
+            try self.eat(.semicolon);
+            try list.append(try self.statement());
+        }
+
+        if (self.current_token.variant() == .identifier) return Error.UnexpectedToken;
+        return list.toOwnedSlice();
+    }
+
+    fn statement(self: *Parser) anyerror!AST.Node {
+        return switch (self.current_token) {
+            .begin => self.compund_statement(),
+            .identifier => self.assign_statement(),
+            else => AST.Node.createNoOp(),
+        };
+    }
+
+    fn assign_statement(self: *Parser) !AST.Node {
+        const left = try self.variable();
+        defer left.destroy(self.alloc);
+
+        const token = self.current_token.clone();
+        try self.eat(.assign);
+
+        const right = try self.expr();
+        defer right.destroy(self.alloc);
+
+        return AST.Node.createAssign(self.alloc, token, left, right);
+    }
+
+    fn variable(self: *Parser) !AST.Node {
+        const node = AST.Node.createVar(self.current_token);
+        try self.eat(.identifier);
+        return node;
+    }
 
     fn factor(self: *Parser) !AST.Node {
         const token = self.current_token.clone();
@@ -55,11 +96,15 @@ pub const Parser = struct {
                 try self.eat(token.variant());
                 const child = try self.factor();
                 defer child.destroy(self.alloc);
-                return try AST.Node.createUnaryOp(self.alloc, token, child);
+                return AST.Node.createUnaryOp(self.alloc, token, child);
             },
             .number => {
                 try self.eat(.number);
-                return try AST.Node.createNumber(token);
+                return AST.Node.createNumber(token);
+            },
+            .identifier => {
+                try self.eat(.identifier);
+                return self.variable();
             },
             .lpar => {
                 try self.eat(.lpar);
@@ -120,15 +165,21 @@ pub const Parser = struct {
     pub fn parse(self: *Parser, input: []const u8) !AST.Node {
         self.lexer = Lexer{ .input = input, .alloc = self.alloc };
         self.current_token = try self.lexer.nextToken();
-        return self.expr();
+        return self.program();
     }
 };
 
 test "unary test" {
     const alloc = std.testing.allocator;
     var parser = Parser{ .alloc = alloc };
-    const root = try parser.parse("---8");
+    const root = try parser.parse("{x = ---8}");
     defer root.destroy(alloc);
+
+    const x_token = try t.Token.createIdentifier(alloc, "x", true);
+    defer x_token.destroy(alloc);
+
+    const assign_token = try t.Token.createBasic(.assign);
+    assign_token.destroy(alloc);
 
     const num_token = try t.Token.createNumber(alloc, 8);
     defer num_token.destroy(alloc);
@@ -136,7 +187,7 @@ test "unary test" {
     const num_node = try AST.Node.createNumber(num_token);
     defer num_node.destroy(alloc);
 
-    const minus_token = try t.Token.createBasic(t.Variants.sub);
+    const minus_token = try t.Token.createBasic(.sub);
     defer minus_token.destroy(alloc);
 
     const unary_1 = try AST.Node.createUnaryOp(alloc, minus_token, num_node);
@@ -148,9 +199,19 @@ test "unary test" {
     const unary_3 = try AST.Node.createUnaryOp(alloc, minus_token, unary_2);
     defer unary_3.destroy(alloc);
 
+    const x_node = try AST.Node.createVar(x_token);
+    defer x_node.destroy(alloc);
+
+    const assign_node = try AST.Node.createAssign(alloc, assign_token, x_node, unary_3);
+
+    const statement_list = try alloc.alloc(AST.Node, 1);
+    statement_list[0] = assign_node;
+    const program = try AST.Node.createCompound(statement_list);
+    defer program.destroy(alloc);
+
     var expected_str = std.ArrayList(u8).init(alloc);
     defer expected_str.deinit();
-    try unary_3.print(expected_str.writer(), 0);
+    try program.print(expected_str.writer(), 0);
 
     var actual_str = std.ArrayList(u8).init(alloc);
     defer actual_str.deinit();
@@ -161,9 +222,17 @@ test "unary test" {
 
 test "simple test" {
     const alloc = std.testing.allocator;
-    const input = "2 + 7 * 3";
+    const input = "{x = 2 + 7 * 3}";
 
     var parser = Parser{ .alloc = alloc };
+
+    // ID (x)
+    const x_token = try t.Token.createIdentifier(alloc, "x", true);
+    defer x_token.destroy(alloc);
+
+    // Assign (=)
+    const assign_token = try t.Token.createBasic(.assign);
+    defer assign_token.destroy(alloc);
 
     // TWO (2)
     const two_token = try t.Token.createNumber(alloc, 2);
@@ -189,6 +258,9 @@ test "simple test" {
     // ---------NODES----------
     //
 
+    const x_node = try AST.Node.createVar(x_token);
+    defer x_node.destroy(alloc);
+
     // SEVEN (7)
     const seven_node = try AST.Node.createNumber(seven_token);
     defer seven_node.destroy(alloc);
@@ -209,10 +281,18 @@ test "simple test" {
     const bin_add_node = try AST.Node.createBinOp(alloc, add_token, two_node, bin_mul_node);
     defer bin_add_node.destroy(alloc);
 
+    const x_assign = try AST.Node.createAssign(alloc, assign_token, x_node, bin_add_node);
+    // x_assign's ownership will be given to program_node, without cloning, so no destroying is needed.
+
+    const statement_list = try alloc.alloc(AST.Node, 1);
+    statement_list[0] = x_assign;
+    const program_node = try AST.Node.createCompound(statement_list);
+    defer program_node.destroy(alloc);
+
     var expected_str = std.ArrayList(u8).init(alloc);
     defer expected_str.deinit();
 
-    try bin_add_node.print(expected_str.writer(), 0);
+    try program_node.print(expected_str.writer(), 0);
 
     // Parse Result:
 

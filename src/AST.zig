@@ -93,7 +93,7 @@ pub const Node = union(enum) {
     }
 
     pub fn createNoOp() Node {
-        return Node{ .noop = {} };
+        return Node{ .noop = .{} };
     }
 
     /// Takes ownership of the children slice
@@ -519,5 +519,5 @@ test "AST statements" {
     defer str_2.deinit();
     try compound_clone.print(str_2.writer(), 0);
 
-    std.debug.print("{s}", .{str_1.items});
+    try std.testing.expectEqualSlices(u8, str_1.items, str_2.items);
 }
