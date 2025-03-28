@@ -2,7 +2,7 @@ const std = @import("std");
 
 const t = @import("token.zig");
 
-pub const LexerErrors = error{
+pub const Error = error{
     TooManyDotsInNumber,
     UnknwonSymbolInSequence,
 };
@@ -57,7 +57,7 @@ pub const Lexer = struct {
 
         while (self.current_char != null and (std.ascii.isDigit(self.current_char.?) or self.current_char.? == '.')) {
             if (self.current_char.? == '.') {
-                if (dot_found) return LexerErrors.TooManyDotsInNumber;
+                if (dot_found) return Error.TooManyDotsInNumber;
                 dot_found = true;
             }
             try number_str.append(self.current_char.?);
@@ -83,7 +83,7 @@ pub const Lexer = struct {
             ')' => try t.Token.createBasic(t.Variants.rpar),
             'a'...'z', 'A'...'Z', '_' => try t.Token.createIdentifier(self.alloc, try self.identifier(), false),
             '0'...'9', '.' => try t.Token.createNumber(self.alloc, try self.number()),
-            else => LexerErrors.UnknwonSymbolInSequence,
+            else => Error.UnknwonSymbolInSequence,
         };
     }
 };

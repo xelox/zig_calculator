@@ -3,6 +3,10 @@ const std = @import("std");
 const t = @import("token.zig");
 const Rc = @import("ref_counter.zig").Rc;
 
+pub const Error = error{
+    BadTokenForNodeType,
+};
+
 pub const Num = struct { token: t.Token };
 const Compund = struct { children: []Node };
 pub const Var = struct { token: t.Token };
@@ -257,10 +261,6 @@ pub const Node = union(enum) {
             },
         }
     }
-};
-
-const Error = error{
-    BadTokenForNodeType,
 };
 
 test "AST number nodes" {

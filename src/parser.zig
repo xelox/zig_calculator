@@ -8,6 +8,7 @@ const RcNode = Rc(AST.Node);
 
 const AST = @import("AST.zig");
 const t = @import("token.zig");
+const l = @import("lexer.zig");
 
 const Error = error{
     UnexpectedToken,
@@ -18,42 +19,60 @@ pub const Parser = struct {
     current_token: t.Token = undefined,
     alloc: std.mem.Allocator,
 
-    fn eat(self: *Parser, variant: t.Variants) void {
+    fn eat(self: *Parser, variant: t.Variants) !void {
         if (self.current_token.variant() == variant) {
             self.current_token.destroy(self.alloc);
-            self.current_token = self.lexer.nextToken() catch |e| panic("{any}", .{e});
+            self.current_token = try self.lexer.nextToken();
         } else {
             return panic("Unexpected Token", .{});
         }
     }
 
-    fn factor(self: *Parser) AST.Node {
+    // fn program(sefl: *Parser) !AST.Node {
+    //     const node = self.compund_statement()
+    //     self.eat(t.Variants.eof);
+    //     return node;
+    // }
+    //
+    // fn compund_statement(self: *Parser) !AST.Node {
+    //     self.eat(t.Variants.begin);
+    //     const nodes = self.statement_list();
+    //     self.eat(t.Variants.end);
+    //     root = try AST.Node.createCompound(nodes);
+    // }
+    //
+    // fn statement_list(self: *Parser) []AST.Node {
+    //     const list = std.ArrayList(AST.Node).init(self.alloc);
+    //
+    // }
+
+    fn factor(self: *Parser) !AST.Node {
         const token = self.current_token.clone();
         defer token.destroy(self.alloc);
 
         switch (token.variant()) {
             .add, .sub => {
-                self.eat(token.variant());
-                const child = self.factor();
+                try self.eat(token.variant());
+                const child = try self.factor();
                 defer child.destroy(self.alloc);
-                return AST.Node.createUnaryOp(self.alloc, token, child) catch |e| panic("{any}", .{e});
+                return try AST.Node.createUnaryOp(self.alloc, token, child);
             },
             .number => {
-                self.eat(.number);
-                return AST.Node.createNumber(token) catch |e| panic("{any}", .{e});
+                try self.eat(.number);
+                return try AST.Node.createNumber(token);
             },
             .lpar => {
-                self.eat(.lpar);
-                const node = self.expr();
-                self.eat(.rpar);
+                try self.eat(.lpar);
+                const node = try self.expr();
+                try self.eat(.rpar);
                 return node;
             },
             else => panic("expected number token or lpar token, but got: {s}", .{@tagName(token.variant())}),
         }
     }
 
-    fn term(self: *Parser) AST.Node {
-        var node = self.factor();
+    fn term(self: *Parser) !AST.Node {
+        var node = try self.factor();
 
         while (switch (self.current_token.variant()) {
             .mul, .div => true,
@@ -61,22 +80,22 @@ pub const Parser = struct {
         }) {
             const token = self.current_token.clone();
             defer token.destroy(self.alloc);
-            self.eat(token.variant());
+            try self.eat(token.variant());
 
             const left = node;
             defer left.destroy(self.alloc);
 
-            const right = self.factor();
+            const right = try self.factor();
             defer right.destroy(self.alloc);
 
-            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| panic("{any}", .{e});
+            node = try AST.Node.createBinOp(self.alloc, token, left, right);
         }
 
         return node;
     }
 
-    fn expr(self: *Parser) AST.Node {
-        var node = self.term();
+    fn expr(self: *Parser) anyerror!AST.Node {
+        var node = try self.term();
 
         while (switch (self.current_token.variant()) {
             .add, .sub => true,
@@ -84,23 +103,23 @@ pub const Parser = struct {
         }) {
             const token = self.current_token.clone();
             defer token.destroy(self.alloc);
-            self.eat(token.variant());
+            try self.eat(token.variant());
 
             const left = node;
             defer left.destroy(self.alloc);
 
-            const right = self.term();
+            const right = try self.term();
             defer right.destroy(self.alloc);
 
-            node = AST.Node.createBinOp(self.alloc, token, left, right) catch |e| panic("{any}", .{e});
+            node = try AST.Node.createBinOp(self.alloc, token, left, right);
         }
 
         return node;
     }
 
-    pub fn parse(self: *Parser, input: []const u8) AST.Node {
+    pub fn parse(self: *Parser, input: []const u8) !AST.Node {
         self.lexer = Lexer{ .input = input, .alloc = self.alloc };
-        self.current_token = self.lexer.nextToken() catch |e| panic("{any}", .{e});
+        self.current_token = try self.lexer.nextToken();
         return self.expr();
     }
 };
@@ -108,7 +127,7 @@ pub const Parser = struct {
 test "unary test" {
     const alloc = std.testing.allocator;
     var parser = Parser{ .alloc = alloc };
-    const root = parser.parse("---8");
+    const root = try parser.parse("---8");
     defer root.destroy(alloc);
 
     const num_token = try t.Token.createNumber(alloc, 8);
@@ -197,7 +216,7 @@ test "simple test" {
 
     // Parse Result:
 
-    const root = parser.parse(input);
+    const root = try parser.parse(input);
     defer root.destroy(alloc);
 
     var actual_str = std.ArrayList(u8).init(alloc);
