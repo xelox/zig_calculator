@@ -24,7 +24,7 @@ pub const Parser = struct {
             self.current_token.destroy(self.alloc);
             self.current_token = try self.lexer.nextToken();
         } else {
-            return panic("Unexpected Token", .{});
+            return Error.UnexpectedToken;
         }
     }
 
@@ -103,7 +103,6 @@ pub const Parser = struct {
                 return AST.Node.createNumber(token);
             },
             .identifier => {
-                try self.eat(.identifier);
                 return self.variable();
             },
             .lpar => {
@@ -279,6 +278,75 @@ test "simple test" {
 
     // ADD (2 + FACTOR)
     const bin_add_node = try AST.Node.createBinOp(alloc, add_token, two_node, bin_mul_node);
+    defer bin_add_node.destroy(alloc);
+
+    const x_assign = try AST.Node.createAssign(alloc, assign_token, x_node, bin_add_node);
+    // x_assign's ownership will be given to program_node, without cloning, so no destroying is needed.
+
+    const statement_list = try alloc.alloc(AST.Node, 1);
+    statement_list[0] = x_assign;
+    const program_node = try AST.Node.createCompound(statement_list);
+    defer program_node.destroy(alloc);
+
+    var expected_str = std.ArrayList(u8).init(alloc);
+    defer expected_str.deinit();
+
+    try program_node.print(expected_str.writer(), 0);
+
+    // Parse Result:
+
+    const root = try parser.parse(input);
+    defer root.destroy(alloc);
+
+    var actual_str = std.ArrayList(u8).init(alloc);
+    defer actual_str.deinit();
+    try root.print(actual_str.writer(), 0);
+
+    try std.testing.expectEqualSlices(u8, expected_str.items, actual_str.items);
+}
+
+test "var used as value" {
+    const alloc = std.testing.allocator;
+    const input = "{x = y + 2}";
+
+    var parser = Parser{ .alloc = alloc };
+
+    // ID (x)
+    const x_token = try t.Token.createIdentifier(alloc, "x", true);
+    defer x_token.destroy(alloc);
+
+    // ID (x)
+    const y_token = try t.Token.createIdentifier(alloc, "y", true);
+    defer y_token.destroy(alloc);
+
+    // Assign (=)
+    const assign_token = try t.Token.createBasic(.assign);
+    defer assign_token.destroy(alloc);
+
+    // TWO (2)
+    const two_token = try t.Token.createNumber(alloc, 2);
+    defer two_token.destroy(alloc);
+
+    // ADD (+)
+    const add_token = try t.Token.createBasic(.add);
+    defer add_token.destroy(alloc);
+
+    //
+    // ---------NODES----------
+    //
+
+    const x_node = try AST.Node.createVar(x_token);
+    defer x_node.destroy(alloc);
+
+    const y_node = try AST.Node.createVar(y_token);
+    defer y_node.destroy(alloc);
+
+    // TWO (2)
+    const two_node = try AST.Node.createNumber(two_token);
+    defer two_node.destroy(alloc);
+
+    // ADD (y + 2)
+    const bin_add_node = try AST.Node.createBinOp(alloc, add_token, y_node, two_node);
     defer bin_add_node.destroy(alloc);
 
     const x_assign = try AST.Node.createAssign(alloc, assign_token, x_node, bin_add_node);

@@ -122,3 +122,21 @@ test "interpret with unary_op" {
 
     try std.testing.expectEqual(expected, result);
 }
+
+test "interpret program v1" {
+    const alloc = std.testing.allocator;
+    const input =
+        \\{
+        \\  x = 12 / 8;
+        \\  y = x - 4;
+        \\  z = (x + y) * 12;
+        \\  result = z - 8
+        \\}
+    ;
+    const expected: f64 = -20;
+
+    var interpreter = Interpreter{ .alloc = alloc };
+    const result = interpreter.interpret(input);
+
+    try std.testing.expectEqual(expected, result);
+}

@@ -41,18 +41,18 @@ pub const Node = union(enum) {
     // zig fmt: on
 
     pub fn createNumber(token: t.Token) !Node {
-        if (token.variant() != t.Variants.number) return Error.BadTokenForNodeType;
+        if (token.variant() != .number) return Error.BadTokenForNodeType;
         return Node{ .number = Num{ .token = token.clone() } };
     }
 
     pub fn createVar(token: t.Token) !Node {
-        if (token.variant() != t.Variants.identifier) return Error.BadTokenForNodeType;
+        if (token.variant() != .identifier) return Error.BadTokenForNodeType;
         return Node{ .variable = Var{ .token = token.clone() } };
     }
 
     pub fn createBinOp(alloc: std.mem.Allocator, token: t.Token, left: Node, right: Node) !Node {
         switch (token.variant()) {
-            t.Variants.add, t.Variants.sub, t.Variants.mul, t.Variants.div => {},
+            .add, .sub, .mul, .div => {},
             else => return Error.BadTokenForNodeType,
         }
 

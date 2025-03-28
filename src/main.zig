@@ -1,15 +1,32 @@
 const std = @import("std");
 const print = std.debug.print;
+const Interpreter = @import("interpreter.zig").Interpreter;
+
+const Error = error{NoSourceSpecified};
 
 pub fn main() !void {
-    const argsArr = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, argsArr);
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
 
-    const argsStr = try std.mem.join(alloc, " ", argsArr[1..]);
+    const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
 
-    var interpreter = Interpreter{ .input = argsStr };
+    if (args.len < 2) return Error.NoSourceSpecified;
 
-    const result = interpreter.eval();
+    const file_path = args[1];
+    const cwd = std.fs.cwd();
+    const file = try cwd.openFileZ(file_path, .{ .mode = .read_only });
+    defer file.close();
 
-    print("{s}={d}\n", .{ argsStr, result });
+    const buffer = try alloc.alloc(u8, 4096);
+    defer alloc.free(buffer);
+    const len = try file.read(buffer);
+    const input = buffer[0..len];
+
+    print("reading file: {s}\n", .{file_path});
+    print("interpreting:\n{s}\n", .{input});
+    var interpreter = Interpreter{ .alloc = alloc };
+    const result = try interpreter.interpret(input);
+    print("result = {?d}\n", .{result});
 }
