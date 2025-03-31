@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Arena = std.heap.ArenaAllocator;
 const Rc = @import("ref_counter.zig").Rc;
 
 pub const Variants = enum {
@@ -18,7 +19,8 @@ pub const Variants = enum {
     eof,
 
     //variables
-    number,
+    integer,
+    float,
     string,
     identifier,
     assign,
@@ -43,33 +45,21 @@ pub const Token = union(Variants) {
     rpar: void,
     eof: void,
 
-    number: Rc(f64),
-    string: Rc([]u8),
-    identifier: Rc([]u8),
+    integer: i64,
+    float: f64,
+    string: []u8,
+    identifier: []const u8,
     assign: void,
 
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
         switch (self) {
-            .identifier => try writer.print("Id({s})", .{try self.getIdentifier()}),
-            .number => try writer.print("Num({d})", .{try self.getNumber()}),
+            .identifier => |value| try writer.print("Id({s})", .{value}),
+            .float => |value| try writer.print("Float({d})", .{value}),
+            .integer => |value| try writer.print("Int({d})", .{value}),
             .add, .sub, .mul, .div => try writer.print("Op({s})", .{@tagName(self.variant())}),
             else => try writer.print("Simb({s})", .{@tagName(self.variant())}),
-        }
-    }
-
-    pub fn getNumber(self: *const Token) !f64 {
-        switch (self.*) {
-            .number => return self.number.data.*,
-            else => return Error.BadGetNumber,
-        }
-    }
-
-    pub fn getIdentifier(self: *const Token) ![]u8 {
-        switch (self.*) {
-            .identifier => return self.identifier.data,
-            else => return Error.BadGetIdentifier,
         }
     }
 
@@ -90,49 +80,58 @@ pub const Token = union(Variants) {
         };
     }
 
-    pub fn createNumber(alloc: Allocator, value: f64) !Token {
-        return .{ .number = try Rc(f64).init(alloc, value) };
+    pub fn createFloat(src: f64) Token {
+        return .{ .float = src };
+    }
+
+    pub fn createInteger(src: i64) Token {
+        return .{ .integer = src };
     }
 
     /// Create an identifier, if copy is false the return Token will take ownership of the slice, if true it will copy it.
-    pub fn createIdentifier(alloc: Allocator, value: []const u8, copy: bool) !Token {
-        if (copy) return .{ .identifier = try Rc([]u8).init(alloc, @constCast(value)) };
-        return .{ .identifier = try Rc([]u8).manage(alloc, @constCast(value)) };
+    pub fn createIdentifier(alloc: Allocator, src: []const u8, do_copy: bool) !Token {
+        const slice = if (!do_copy) src else blk: {
+            const new_slice = try alloc.alloc(u8, src.len);
+            @memcpy(new_slice, src);
+            break :blk new_slice;
+        };
+        return .{ .identifier = slice };
     }
 
-    pub fn clone(self: *const Token) Token {
+    // Performs deep copy for heap allocated slices.
+    pub fn copy(self: *const Token, alloc: Allocator) Token {
         return switch (self.*) {
-            .number => |value| .{ .number = value.clone() },
-            .string => |value| .{ .string = value.clone() },
-            .identifier => |value| .{ .identifier = value.clone() },
+            .string => |value| blk: {
+                const new_slice = alloc.alloc(u8, value.len);
+                @memcpy(new_slice, value);
+                break :blk .{ .string = new_slice };
+            },
+            .identifier => |value| blk: {
+                const new_slice = alloc.alloc(u8, value.len);
+                @memcpy(new_slice, value);
+                break :blk .{ .identifier = new_slice };
+            },
             else => self.*,
         };
     }
 
-    pub fn destroy(self: *const @This(), alloc: Allocator) void {
+    pub fn free(self: *const Token, alloc: Allocator) void {
         switch (self.*) {
-            .number => |item| item.release(alloc),
-            .string => |item| item.release(alloc),
-            .identifier => |item| item.release(alloc),
+            .string => |mem| alloc.free(mem),
+            .identifier => |mem| alloc.free(mem),
             else => {},
         }
     }
 
-    pub fn eql(self: *const Token, rhs: *const Token) bool {
-        if (std.meta.activeTag(self.*) != std.meta.activeTag(rhs.*)) return false;
-        switch (self.*) {
-            .number => {
-                const lhs_value: f64 = self.number.data.*;
-                const rhs_value: f64 = rhs.number.data.*;
-                return lhs_value == rhs_value;
-            },
-            .identifier => {
-                const lhs_value: []u8 = self.identifier.data;
-                const rhs_value: []u8 = rhs.identifier.data;
-                return std.mem.eql(u8, lhs_value, rhs_value);
-            },
-            else => return true,
-        }
+    pub fn eql(self: *const Token, other: *const Token) bool {
+        if (self.variant() != other.variant()) return false;
+        return switch (self.*) {
+            .float => self.float == other.float,
+            .integer => self.integer == other.integer,
+            .identifier => std.mem.eql(u8, self.identifier, other.identifier),
+            .string => std.mem.eql(u8, self.string, other.string),
+            else => true,
+        };
     }
 
     pub fn variant(self: *const Token) Variants {
@@ -141,16 +140,12 @@ pub const Token = union(Variants) {
 };
 
 test "number tokens" {
-    const alloc = std.testing.allocator;
+    const token42 = Token.createFloat(42.0);
 
-    const token42 = try Token.createNumber(alloc, 42.0);
-    defer token42.destroy(alloc);
-
-    const token42val = try token42.getNumber();
+    const token42val = token42.float;
     try std.testing.expectEqual(token42val, 42.0);
 
-    const other = try Token.createNumber(alloc, 42.0);
-    defer other.destroy(alloc);
+    const other = Token.createFloat(42.0);
 
     try std.testing.expect(token42.eql(&other));
 }
@@ -158,43 +153,39 @@ test "number tokens" {
 test "identifier tokens" {
     const alloc = std.testing.allocator;
 
-    const hello_world = "hello world!";
+    const hello_world_str = "hello world!";
 
-    const hello_ptr1 = try alloc.alloc(u8, hello_world.len);
-    std.mem.copyBackwards(u8, hello_ptr1, hello_world);
+    const hello_ptr1 = try alloc.alloc(u8, hello_world_str.len);
+    @memcpy(hello_ptr1, hello_world_str);
+
+    // identifier token created from heap string
     const rhs_token = try Token.createIdentifier(alloc, hello_ptr1, false);
-    defer rhs_token.destroy(alloc);
+    defer rhs_token.free(alloc);
 
-    const hello_ptr2 = try alloc.alloc(u8, hello_world.len);
-    std.mem.copyBackwards(u8, hello_ptr2, hello_world);
-    const lhs_token = try Token.createIdentifier(alloc, hello_ptr2, false);
-    defer lhs_token.destroy(alloc);
+    // identifier token created from static string
+    const lhs_token = try Token.createIdentifier(alloc, "hello world!", true);
+    defer lhs_token.free(alloc);
 
     try std.testing.expect(rhs_token.eql(&lhs_token));
 
-    const other_ptr = try alloc.alloc(u8, 3);
-    std.mem.copyBackwards(u8, other_ptr, "xyz");
-    const other_token = try Token.createIdentifier(alloc, other_ptr, false);
-    defer other_token.destroy(alloc);
+    const other_token = try Token.createIdentifier(alloc, "xyz", true);
+    defer other_token.free(alloc);
 
     try std.testing.expect(!rhs_token.eql(&other_token));
 }
 
 test "token equality" {
-    const alloc = std.testing.allocator;
-
-    const mul = try Token.createBasic(Variants.mul);
-    const other_mul = try Token.createBasic(Variants.mul);
-    const not_mul = try Token.createBasic(Variants.add);
+    const mul = try Token.createBasic(.mul);
+    const other_mul = try Token.createBasic(.mul);
+    const not_mul = try Token.createBasic(.add);
 
     try std.testing.expect(mul.eql(&other_mul));
     try std.testing.expect(!mul.eql(&not_mul));
 
-    const a = try Token.createNumber(alloc, 69);
-    defer a.destroy(alloc);
-
-    const b = try Token.createNumber(alloc, 420);
-    defer b.destroy(alloc);
+    const a = Token.createInteger(69);
+    const b = Token.createInteger(420);
+    const z = Token.createInteger(69);
 
     try std.testing.expect(!a.eql(&b));
+    try std.testing.expect(a.eql(&z));
 }

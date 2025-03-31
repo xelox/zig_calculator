@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Arena = std.heap.ArenaAllocator;
 const panic = std.debug.panic;
 
 const p = @import("parser.zig");
@@ -18,9 +19,28 @@ pub const Interpreter = struct {
     alloc: Allocator,
     global_vars: std.StringHashMap(f64) = undefined,
 
-    fn visit_compound(self: *Interpreter, node: *const AST.Node) !void {
+    pub fn init(arena: *Arena) Interpreter {
+        return .{
+            .alloc = arena.allocator(),
+            .parser = p.Parser.init(arena),
+        };
+    }
+
+    pub fn interpret(self: *Interpreter, input: []const u8) !?f64 {
+        self.global_vars = std.StringHashMap(f64).init(self.alloc);
+        defer self.global_vars.deinit();
+
+        const ast_root = try self.parser.parse(input);
+
+        try self.visit_block(&ast_root);
+        const result = self.global_vars.get("result");
+
+        return result;
+    }
+
+    fn visit_block(self: *Interpreter, node: *const AST.Node) !void {
         switch (node.*) {
-            .compound => |compound| {
+            .block => |compound| {
                 for (compound.children) |*child| {
                     try self.visit_statement(child);
                 }
@@ -32,7 +52,7 @@ pub const Interpreter = struct {
     fn visit_statement(self: *Interpreter, node: *const AST.Node) !void {
         switch (node.*) {
             .assign_op => |assign_op| {
-                const var_id: []u8 = try self.var_id_from_node(assign_op.left);
+                const var_id = assign_op.left.variable.token.identifier;
                 const rhsv = try self.val_from_node(assign_op.right);
                 try self.global_vars.put(var_id, rhsv);
             },
@@ -40,21 +60,13 @@ pub const Interpreter = struct {
         }
     }
 
-    fn var_id_from_node(self: *Interpreter, node: *const AST.Node) ![]u8 {
-        _ = self;
-        return switch (node.*) {
-            .variable => |v| try v.token.getIdentifier(),
-            else => Error.NotAVariable,
-        };
-    }
-
     fn val_from_node(self: *Interpreter, node: *const AST.Node) anyerror!f64 {
         return switch (node.*) {
-            .number => |*n| try n.token.getNumber(),
+            .number => |*n| n.token.float,
             .bin_op => |*op| self.visit_bin_op(op),
             .unary_op => |*op| self.visit_unary_op(op),
             .variable => |*v| blk: {
-                const var_id = try v.token.getIdentifier();
+                const var_id = v.token.identifier;
                 const value = self.global_vars.get(var_id) orelse {
                     return Error.VariableDoesNotExist;
                 };
@@ -85,46 +97,36 @@ pub const Interpreter = struct {
             else => Error.UnexpectedToken,
         };
     }
-
-    pub fn interpret(self: *Interpreter, input: []const u8) !?f64 {
-        self.parser = p.Parser{ .alloc = self.alloc };
-
-        self.global_vars = std.StringHashMap(f64).init(self.alloc);
-        defer self.global_vars.deinit();
-
-        const ast_root = try self.parser.parse(input);
-        defer ast_root.destroy(self.alloc);
-
-        try self.visit_compound(&ast_root);
-        const result = self.global_vars.get("result");
-        return result;
-    }
 };
 
 test "interpret bin_op only" {
-    const alloc = std.testing.allocator;
+    var arena = Arena.init(std.testing.allocator);
+    defer arena.deinit();
+
     const input = "{result = 14 + 8 * (1 - 8 / 2) * (4 / (2 + 4))}";
     const expected: f64 = -2;
-
-    var interpreter = Interpreter{ .alloc = alloc };
+    var interpreter = Interpreter.init(&arena);
     const result = interpreter.interpret(input);
 
     try std.testing.expectEqual(expected, result);
 }
 
 test "interpret with unary_op" {
-    const alloc = std.testing.allocator;
+    var arena = Arena.init(std.testing.allocator);
+    defer arena.deinit();
+
     const input = "{result = 44 + -8 * -(2 / 8 + 0.5 * - (4))}";
     const expected: f64 = 30;
-
-    var interpreter = Interpreter{ .alloc = alloc };
+    var interpreter = Interpreter.init(&arena);
     const result = interpreter.interpret(input);
 
     try std.testing.expectEqual(expected, result);
 }
 
 test "interpret program v1" {
-    const alloc = std.testing.allocator;
+    var arena = Arena.init(std.testing.allocator);
+    defer arena.deinit();
+
     const input =
         \\{
         \\  x = 12 / 8;
@@ -134,8 +136,7 @@ test "interpret program v1" {
         \\}
     ;
     const expected: f64 = -20;
-
-    var interpreter = Interpreter{ .alloc = alloc };
+    var interpreter = Interpreter.init(&arena);
     const result = interpreter.interpret(input);
 
     try std.testing.expectEqual(expected, result);

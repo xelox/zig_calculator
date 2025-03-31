@@ -7,7 +7,9 @@ const Error = error{NoSourceSpecified};
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+    const alloc = arena.allocator();
 
     const args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, args);
@@ -26,7 +28,7 @@ pub fn main() !void {
 
     print("reading file: {s}\n", .{file_path});
     print("interpreting:\n{s}\n", .{input});
-    var interpreter = Interpreter{ .alloc = alloc };
+    var interpreter = Interpreter.init(&arena);
     const result = try interpreter.interpret(input);
     print("result = {?d}\n", .{result});
 }
